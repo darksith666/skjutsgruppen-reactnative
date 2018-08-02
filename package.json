@@ -54,7 +54,7 @@
     "redux-persist": "^5.5.0",
     "redux-thunk": "^2.2.0",
     "subscriptions-transport-ws": "0.8.2",
-    "tipsi-twitter": "^2.0.0"
+    "tipsi-twitter": "2.0.0"
   },
   "devDependencies": {
     "babel-eslint": "^7.2.3",

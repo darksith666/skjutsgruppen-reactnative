@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { StyleSheet, View, TouchableOpacity, Image, Modal, Alert, Platform, PermissionsAndroid, Linking, NativeModules, BackHandler, AlertIOS } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Image, Modal, Alert, Platform, PermissionsAndroid, Linking, NativeModules, BackHandler, AlertIOS, Dimensions, PanResponder, UIManager, LayoutAnimation, Easing } from 'react-native';
 import FeedItem from '@components/feed/feedItem';
 import Filter from '@components/feed/filter';
 import { Wrapper, Circle } from '@components/common';
@@ -13,6 +13,7 @@ import FeedIconActive from '@assets/icons/ic_feed_active.png';
 import Map from '@assets/map_toggle.png';
 import { getCountryLocation, getCurrentLocation } from '@helpers/device';
 import { trans } from '@lang/i18n';
+import MapView from '@screens/Map';
 import {
   FEEDABLE_TRIP,
   FEEDABLE_GROUP,
@@ -46,6 +47,15 @@ import NewsCard from '@components/feed/card/news';
 
 const FeedExperience = withGetExperiences(List);
 
+const LayoutAnimationconfig = {
+  duration: 500,
+  update: {
+    type: 'easeInEaseOut',
+  },
+};
+
+const winHeight = Dimensions.get('window').height;
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -63,6 +73,7 @@ const styles = StyleSheet.create({
   },
   mapWrapper: {
     alignSelf: 'flex-end',
+    opacity: 0,
   },
   mapImg: {
     resizeMode: 'contain',
@@ -131,11 +142,48 @@ class Feed extends Component {
       totalExperiences: 0,
       loading: false,
       showCoCreateModal: true,
+      yPos: 0,
+      mapView: false,
     });
 
     this.feedList = null;
     this.messageListener = null;
     this.backButtonPressed = false;
+
+    if (UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+
+    this.panResponder = PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
+        const { dy } = gestureState;
+        if (this.state.yPos <= 0 && dy > 0) this.feedList.setNativeProps({ scrollEnabled: false });
+        return this.state.yPos <= 0 && dy > 4;
+      },
+
+      onPanResponderRelease: (evt, { dy }) => {
+        if (dy < 150) {
+          this.setFeedView();
+        } else {
+          this.setMapView();
+        }
+        this.feedList.setNativeProps({ scrollEnabled: true });
+      },
+
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderTerminate: (evt, { dy }) => {
+        if (dy < 150) {
+          this.setFeedView();
+        } else {
+          this.setMapView();
+        }
+        this.feedList.setNativeProps({ scrollEnabled: true });                                     
+      },
+
+      onPanResponderMove: (event, { dy }) => {
+        this.setFeedWrapperOffset(dy);
+      },
+    });
   }
 
   async componentWillMount() {
@@ -258,6 +306,53 @@ class Feed extends Component {
         const from = (longitude && longitude) ? [longitude, latitude] : [];
         this.props.feeds.refetch({ offset: 0, filter: { type, from } });
       });
+    }
+  }
+
+  onScroll = (event) => {
+    this.setState(() => ({ yPos: event }));
+  }
+
+  onScrollEndDrag = (event) => {
+    if (event.nativeEvent.contentOffset.y < -100) {
+      this.setMapView();
+    } else {
+      this.setFeedView();
+    }
+  }
+
+  setMapView = () => {
+    if (Platform.OS === 'ios') {
+      LayoutAnimation.configureNext(LayoutAnimationconfig, () => this.setState({ mapView: true }));
+    } else {
+      LayoutAnimation.configureNext(LayoutAnimationconfig);
+    }
+
+    this.feedWraper.setNativeProps({ top: winHeight + 100 });
+
+    if (Platform.OS === 'android') {
+      setTimeout(() => this.setState({ mapView: true }), 600);
+    }
+  }
+
+  setFeedView = () => {
+    if (Platform.OS === 'ios') {
+      LayoutAnimation.configureNext(LayoutAnimationconfig, () => this.setState({ mapView: false }));
+    } else {
+      LayoutAnimation.configureNext(LayoutAnimationconfig);
+    }
+
+    this.feedWraper.setNativeProps({ top: 0 });
+
+    if (Platform.OS === 'android') {
+      this.setState({ mapView: false });
+    }
+  }
+
+  setFeedWrapperOffset = (offset) => {
+    if (offset > 0) {
+      // LayoutAnimation.configureNext(LayoutAnimationconfig);
+      this.feedWraper.setNativeProps({ top: offset });
     }
   }
 
@@ -570,13 +665,17 @@ class Feed extends Component {
         }}
         shouldUpdateAnimatedValue
         noResultText={noResultText}
+        onScroll={this.onScroll}
+        onScrollEndDrag={this.onScrollEndDrag}
       />
     );
   }
 
   renderMap = () => (
     <TouchableOpacity onPress={() => this.props.navigation.navigate('Map')} style={styles.mapWrapper}>
-      <Image source={Map} style={styles.mapImg} />
+      <View>
+        <Image source={Map} style={styles.mapImg} />
+      </View>
     </TouchableOpacity>
   );
 
@@ -589,18 +688,35 @@ class Feed extends Component {
   }
 
   render() {
+    const { navigation } = this.props;
     return (
       <Wrapper bgColor={Colors.background.mutedBlue}>
-        <Circle animatable />
         {/* <NewsCard isStatic title="Wednesday we celebrated our 10th anniversarry" /> */}
-        {this.renderFeed()}
+        <MapView
+          fullView={this.state.mapView}
+          setFeedView={this.setFeedView}
+          navigation={navigation}
+        />
+        <View
+          style={{ flex: 1 }}
+          ref={(ref) => { this.feedWraper = ref; }}
+          {...this.panResponder.panHandlers}
+        >
+          <Image
+            source={require('@assets/feed_bg.png')}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: Dimensions.get('window').width,
+              height: Dimensions.get('window').height,
+              resizeMode: 'cover',
+            }}
+          />
+          <Circle animatable />
+          {this.renderFeed()}
+        </View>
         {this.renderShareModal()}
-        {/* <Filter
-          selected={this.state.filterType}
-          onPress={this.onFilterChange}
-          showModal={this.state.filterOpen}
-          onCloseModal={() => this.setFilterVisibility(false)}
-        /> */}
         {this.renderCoCreateModal()}
       </Wrapper>
     );
